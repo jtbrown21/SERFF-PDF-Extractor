@@ -140,6 +140,8 @@ function extractSERFF(text) {
     .replace(/SERFF Tracking #:[\s\S]*?\n\s*\n/g, '');
   const lines = cleaned.split('\n').map(l => l.trim());
 
+  const disapproved = /(serff status:|state status:|disposition status:)[^\n]*disapproved/i.test(cleaned);
+
   // Filing‑at‑a‑Glance ------------------------------------------------------
   const glaIdx = lines.findIndex(l => /^filing at a glance$/i.test(l));
   if (glaIdx === -1) throw new Error('Missing Filing at a Glance');
@@ -151,6 +153,10 @@ function extractSERFF(text) {
   }
   const filingAtGlance = parseSection(glaLines);
   delete filingAtGlance.companies;
+
+  if (disapproved) {
+    return { disapproved: true, common: { filingAtGlance, rateInformation: {} }, rows: [] };
+  }
 
   // Rate Information -------------------------------------------------------
   const txtLower = cleaned.toLowerCase();
@@ -198,9 +204,11 @@ const out = [];
 
 items.forEach(item => {
   try {
-    const { common, rows } = extractSERFF(item.json.text || '');
+    const { common, rows, disapproved } = extractSERFF(item.json.text || '');
     if (rows.length) {
       rows.forEach(r => out.push({ json: { ...common.filingAtGlance, ...common.rateInformation, ...r } }));
+    } else if (disapproved) {
+      out.push({ json: { ...common.filingAtGlance } });
     } else {
       out.push({ json: { ...common.filingAtGlance, ...common.rateInformation, parse_warning: 'No Company Rate rows found' } });
     }
