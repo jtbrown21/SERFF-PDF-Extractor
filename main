@@ -117,6 +117,17 @@ function parseCompanyRateRows(block) {
     slice.forEach((v, idx) => obj[CONFIG.fieldRules[idx].key] = v || '');
     rows.push(obj);
   }
+
+  if (!rows.length) {
+    const raw = block.split('\n').map(l => l.trim());
+    const first = raw.findIndex(l => l && !l.endsWith(':'));
+    if (first !== -1 && raw.length >= first + CHUNK) {
+      const slice = raw.slice(first, first + CHUNK);
+      const obj = {};
+      slice.forEach((v, idx) => obj[CONFIG.fieldRules[idx].key] = v || '');
+      if (Object.values(obj).some(v => v)) rows.push(obj);
+    }
+  }
   return rows;
 }
 
