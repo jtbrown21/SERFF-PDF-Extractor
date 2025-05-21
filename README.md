@@ -9,10 +9,10 @@ be used to try the parser locally.
 ## Running locally
 
 Make sure you have Node.js installed. Then run the script with the example
-input and redirect the output to a file:
+input using a single Node command:
 
 ```bash
-node main < testinput.json > output.json
+node -e "const fs=require('fs');const items=JSON.parse(fs.readFileSync('testinput.json','utf8')).map(o=>({json:o}));const script=fs.readFileSync('./main','utf8');const run=new Function('items',script);console.log(JSON.stringify(run(items),null,2));" > output.json
 ```
 
 The command reads the JSON from `testinput.json`, processes the file, and writes
