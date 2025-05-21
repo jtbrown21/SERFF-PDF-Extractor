@@ -46,21 +46,32 @@ const looksTracking = v => /^[A-Z]{2,}-\d{6,}/.test(v.trim());
 function parseSection(lines) {
   const out = {};
   let lastKey = null;
+  let prefix = '';
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
 
+    // capture multi-line keys like "Effective Date" + "Requested (New):"
+    if (/^effective date$/i.test(line)) {
+      prefix = 'Effective Date ';
+      lastKey = null;
+      continue;
+    }
+
     const inline = CONFIG.keyInlineRe.exec(line);
     if (inline) {
       const [, k, v] = inline;
-      lastKey = norm(k);
+      const fullKey = (prefix + k).trim();
+      lastKey = norm(fullKey);
       out[lastKey] = v.trim();
+      prefix = '';
       continue;
     }
 
     const keyOnly = CONFIG.keyOnlyRe.exec(line);
     if (keyOnly) {
-      const nk = norm(keyOnly[1]);
+      const label = (prefix + keyOnly[1]).trim();
+      const nk = norm(label);
       let j = i + 1;
       while (j < lines.length && !lines[j].trim()) j++;
       const next = lines[j] ? lines[j].trim() : '';
@@ -68,6 +79,7 @@ function parseSection(lines) {
       out[nk] = (next && !isHeader) ? next : '';
       lastKey = nk;
       i = j;
+      prefix = '';
       continue;
     }
 
@@ -108,22 +120,7 @@ function parseCompanyRateRows(block) {
   return rows;
 }
 
-// ---------- top & rate helpers -------------------------------------------
-function parseTop(text) {
-  const top = {};
-  [
-    [/SERFF Tracking #:\s*([^\s]+)/i,           'serfftrackingnumber'],
-    [/State Tracking #:\s*([^\s]+)/i,           'statetrackingnumber'],
-    [/Company Tracking #:\s*([^\s]+)/i,         'companytrackingnumber'],
-    [/State:\s*([^\n]+)/i,                      'state'],
-    [/TOI\/Sub-TOI:\s*([^\n]+)/i,               'toisubtoi'],
-    [/Product Name:\s*([^\n]+)/i,               'productname'],
-    [/Project Name\/Number:\s*([^\n]+)/i,       'projectnamenumber'],
-  ].forEach(([re,k])=>{const m=re.exec(text);if(m)top[k]=m[1].trim();});
-  return top;
-}
-
-// ---------- core extractor -----------------------------------------------
+// ---------- rate helpers -------------------------------------------------
 function extractSERFF(text) {
   const cleaned = text
     .split('\n')
@@ -176,7 +173,7 @@ function extractSERFF(text) {
   // Company Rate Information ----------------------------------------------
   const afterRI = lines.slice(riLineIdx + 1);
   const crIdx = afterRI.findIndex(l => /^company rate information$/i.test(l));
-  if (crIdx === -1) return { common:{topOfPage:parseTop(text), filingAtGlance, rateInformation}, rows: [] };
+  if (crIdx === -1) return { common:{filingAtGlance, rateInformation}, rows: [] };
   const crLines = [];
   for (let i = crIdx + 1; i < afterRI.length; i++) {
     const t = afterRI[i].toLowerCase();
@@ -184,7 +181,7 @@ function extractSERFF(text) {
     crLines.push(afterRI[i]);
   }
   const rows = parseCompanyRateRows(crLines.join('\n'));
-  return { common:{topOfPage:parseTop(text), filingAtGlance, rateInformation}, rows };
+  return { common:{filingAtGlance, rateInformation}, rows };
 }
 
 // ================== n8n wrapper =========================================
@@ -194,9 +191,9 @@ items.forEach(item => {
   try {
     const { common, rows } = extractSERFF(item.json.text || '');
     if (rows.length) {
-      rows.forEach(r => out.push({ json: { ...common.topOfPage, ...common.filingAtGlance, ...common.rateInformation, ...r } }));
+      rows.forEach(r => out.push({ json: { ...common.filingAtGlance, ...common.rateInformation, ...r } }));
     } else {
-      out.push({ json: { ...common.topOfPage, ...common.filingAtGlance, ...common.rateInformation, parse_warning: 'No Company Rate rows found' } });
+      out.push({ json: { ...common.filingAtGlance, ...common.rateInformation, parse_warning: 'No Company Rate rows found' } });
     }
   } catch (err) {
     out.push({ json: { parse_error: err.message, snippet: (item.json.text || '').slice(0, 100) } });
