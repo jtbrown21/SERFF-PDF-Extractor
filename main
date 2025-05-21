@@ -3,8 +3,8 @@
  *
  * • Parses SERFF PDFs (both vertical and horizontal value layouts).
  * • Fans out one item per company in the Company Rate Information table.
- * • Keeps Top‑of‑Page, Filing‑at‑a‑Glance (with `companies` as array), and Rate
- *   Information identical for every item.
+ * • Keeps Top‑of‑Page, Filing‑at‑a‑Glance, and Rate Information identical for
+ *   every item.
  * • If no valid company rows are found, emits a single placeholder item so the
  *   input still produces **one** output.
  * • If parsing throws, catches the error and emits a single `parse_error` item
@@ -139,9 +139,7 @@ function extractSERFF(text) {
     glaLines.push(lines[i]);
   }
   const filingAtGlance = parseSection(glaLines);
-  if (filingAtGlance.companies) {
-    filingAtGlance.companies = filingAtGlance.companies.split('\n').map(s=>s.trim()).filter(Boolean);
-  }
+  delete filingAtGlance.companies;
 
   // Rate Information -------------------------------------------------------
   const txtLower = cleaned.toLowerCase();
