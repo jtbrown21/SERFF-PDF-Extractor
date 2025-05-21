@@ -1,0 +1,181 @@
+/**
+ * n8n Function‑Item – 1‑in‑1‑out guarantee (v2)
+ *
+ * • Parses SERFF PDFs (both vertical and horizontal value layouts).
+ * • Fans out one item per company in the Company Rate Information table.
+ * • Keeps Top‑of‑Page, Filing‑at‑a‑Glance (with `companies` as array), and Rate
+ *   Information identical for every item.
+ * • If no valid company rows are found, emits a single placeholder item so the
+ *   input still produces **one** output.
+ * • If parsing throws, catches the error and emits a single `parse_error` item
+ *   so downstream nodes never miss a record.
+ */
+
+// ---------- constants & helpers ------------------------------------------
+const FIELD_LABELS = [
+  'CompanyName',
+  'Overall %IndicatedChange',
+  'Overall %RateImpact',
+  'Written PremiumChange for this Program',
+  'Number of PolicyHolders Affected for this Program',
+  'WrittenPremium for this Program',
+  "Maximum %Change(where req'd)",
+  "Minimum %Change(where req'd)",
+];
+const FIELD_RULES = FIELD_LABELS.map(l => ({
+  key  : l.toLowerCase().replace(/[^a-z0-9]+/g, ''),
+  label: l,
+}));
+
+const FOOTER_RE   = /^PDF Pipeline for SERFF Tracking Number .* Generated .*$/im;
+const END_MARKERS = [
+  'general information', 'rate information', 'company rate information',
+  'pdf pipeline', 'disposition',
+];
+const KEY_ONLY_RE   = /^([\w %()\-.+'/#]+):\s*$/;
+const KEY_INLINE_RE = /^([\w %()\-.+'/#]+):\s*(.*)$/;
+const norm = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+// heuristics --------------------------------------------------------------
+const looksPercent = v => /^-?\d*(?:\.\d+)?%$/.test(v.trim()) || v.trim() === '%';
+const looksCompany = v => /^[a-z][a-z .,&'-]{3,}$/i.test(v.trim());
+const looksTracking = v => /^[A-Z]{2,}-\d{6,}/.test(v.trim());
+
+// ---------- generic key:value parser -------------------------------------
+function parseSection(lines) {
+  const out = {}; let lastKey = null;
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim(); if (!raw) continue;
+    const inl = KEY_INLINE_RE.exec(raw);
+    const keyOnly = !inl && KEY_ONLY_RE.exec(raw);
+
+    if (inl) {
+      const [, k, v] = inl; const nk = norm(k);
+      out[nk] = v.trim(); lastKey = nk;
+    } else if (keyOnly) {
+      const key = keyOnly[1].trim(); const nk = norm(key);
+      let j = i + 1; while (j < lines.length && !lines[j].trim()) j++;
+      const isHeader = KEY_ONLY_RE.test(lines[j]);
+      const val = (j < lines.length && !isHeader) ? lines[j].trim() : '';
+      out[nk] = val; lastKey = nk; i = j;
+    } else if (lastKey) {
+      out[lastKey] = (out[lastKey] + '\n' + raw).trim();
+    }
+  }
+  return out;
+}
+
+// ---------- Company Rate block ➜ row objects -----------------------------
+function parseCompanyRateRows(block) {
+  const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+  const start = lines.findIndex(l => !l.endsWith(':'));
+  if (start === -1) return [];
+  const vals = lines.slice(start);
+
+  const rows = []; const CHUNK = FIELD_LABELS.length;
+  for (let i = 0; i + CHUNK - 1 < vals.length; i += CHUNK) {
+    const slice = vals.slice(i, i + CHUNK);
+    const first = slice[0];
+
+    // stop if we clearly reached a footer/header or misaligned chunk
+    if (!looksCompany(first) || looksTracking(first) || /^company$/i.test(first)) break;
+
+    const obj = {};
+    slice.forEach((v, idx) => obj[FIELD_RULES[idx].key] = v || '');
+    rows.push(obj);
+  }
+  return rows;
+}
+
+// ---------- top & rate helpers -------------------------------------------
+function parseTop(text) {
+  const top = {};
+  [
+    [/SERFF Tracking #:\s*([^\s]+)/i,           'serfftrackingnumber'],
+    [/State Tracking #:\s*([^\s]+)/i,           'statetrackingnumber'],
+    [/Company Tracking #:\s*([^\s]+)/i,         'companytrackingnumber'],
+    [/State:\s*([^\n]+)/i,                      'state'],
+    [/TOI\/Sub-TOI:\s*([^\n]+)/i,               'toisubtoi'],
+    [/Product Name:\s*([^\n]+)/i,               'productname'],
+    [/Project Name\/Number:\s*([^\n]+)/i,       'projectnamenumber'],
+  ].forEach(([re,k])=>{const m=re.exec(text);if(m)top[k]=m[1].trim();});
+  return top;
+}
+
+// ---------- core extractor -----------------------------------------------
+function extractSERFF(text) {
+  const cleaned = text
+    .split('\n').filter(l => !FOOTER_RE.test(l)).join('\n')
+    .replace(/SERFF Tracking #:[\s\S]*?\n\s*\n/g, '');
+  const lines = cleaned.split('\n');
+
+  // Filing‑at‑a‑Glance ------------------------------------------------------
+  const glaIdx = lines.findIndex(l => /^filing at a glance$/i.test(l.trim()));
+  if (glaIdx === -1) throw new Error('Missing Filing at a Glance');
+  const glaLines = [];
+  for (let i = glaIdx + 1; i < lines.length; i++) {
+    const t = lines[i].trim().toLowerCase(); if (END_MARKERS.includes(t)) break;
+    glaLines.push(lines[i]);
+  }
+  const filingAtGlance = parseSection(glaLines);
+  if (filingAtGlance.companies) {
+    filingAtGlance.companies = filingAtGlance.companies.split('\n').map(s=>s.trim()).filter(Boolean);
+  }
+
+  // Rate Information -------------------------------------------------------
+  const txtLower = cleaned.toLowerCase();
+  const startRI = txtLower.indexOf('rate data applies to filing');
+  if (startRI === -1) throw new Error('Missing Rate Info');
+  let endRI = cleaned.length;
+  END_MARKERS.forEach(m => {
+    const i = txtLower.indexOf(m, startRI + 1);
+    if (i !== -1 && i < endRI) endRI = i;
+  });
+  const rateBlock = cleaned.slice(startRI, endRI);
+  const RATE_KEYS = [
+    'Filing Method',
+    'Rate Change Type',
+    'Overall Percentage of Last Rate Revision',
+    'Effective Date of Last Rate Revision',
+    'Filing Method of Last Filing',
+    'SERFF Tracking Number of Last Filing',
+  ];
+  const rateInformation = {};
+  RATE_KEYS.forEach(k => {
+    const nk = norm(k);
+    const rx = new RegExp(k.replace(/[-/()]/g, '\\$&') + '\\s*:\\s*([^\\r\\n]*)', 'i');
+    const m = rx.exec(rateBlock);
+    rateInformation[nk] = m ? m[1].trim() : '';
+  });
+
+  // Company Rate Information ----------------------------------------------
+  const afterRI = lines.slice(lines.findIndex((l,i)=>/rate data applies to filing/i.test(l)) + 1);
+  const crIdx = afterRI.findIndex(l => /^company rate information$/i.test(l.trim()));
+  if (crIdx === -1) return { common:{topOfPage:parseTop(text), filingAtGlance, rateInformation}, rows: [] };
+  const crLines = [];
+  for (let i = crIdx + 1; i < afterRI.length; i++) {
+    const t = afterRI[i].trim().toLowerCase();
+    if (END_MARKERS.includes(t) || /^serff tracking #:?/i.test(t)) break;
+    crLines.push(afterRI[i]);
+  }
+  const rows = parseCompanyRateRows(crLines.join('\n'));
+  return { common:{topOfPage:parseTop(text), filingAtGlance, rateInformation}, rows };
+}
+
+// ================== n8n wrapper =========================================
+const out = [];
+
+items.forEach(item => {
+  try {
+    const { common, rows } = extractSERFF(item.json.text || '');
+    if (rows.length) {
+      rows.forEach(r => out.push({ json: { ...common.topOfPage, ...common.filingAtGlance, ...common.rateInformation, ...r } }));
+    } else {
+      out.push({ json: { ...common.topOfPage, ...common.filingAtGlance, ...common.rateInformation, parse_warning: 'No Company Rate rows found' } });
+    }
+  } catch (err) {
+    out.push({ json: { parse_error: err.message } });
+  }
+});
+
+return out;
