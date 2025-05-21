@@ -87,12 +87,17 @@ function parseCompanyRateRows(block) {
 
   const rows = [];
   const CHUNK = CONFIG.fieldLabels.length;
+  const PERCENT_COLS = [1, 2, 6, 7];
   for (let i = 0; i + CHUNK - 1 < vals.length; i += CHUNK) {
     const slice = vals.slice(i, i + CHUNK);
     const first = slice[0];
 
     // skip clearly invalid chunks but continue parsing
     if (!looksCompany(first) || looksTracking(first) || /^company$/i.test(first)) {
+      continue;
+    }
+
+    if (PERCENT_COLS.some(idx => slice[idx] && !looksPercent(slice[idx]))) {
       continue;
     }
 
