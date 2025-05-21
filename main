@@ -140,6 +140,8 @@ function extractSERFF(text) {
     .replace(/SERFF Tracking #:[\s\S]*?\n\s*\n/g, '');
   const lines = cleaned.split('\n').map(l => l.trim());
 
+  const coCodes = Array.from(cleaned.matchAll(/CoCode:\s*(\d+)/gi), m => m[1].trim());
+
   const disapproved = /(serff status:|state status:|disposition status:)[^\n]*disapproved/i.test(cleaned);
 
   // Filing‑at‑a‑Glance ------------------------------------------------------
@@ -196,6 +198,7 @@ function extractSERFF(text) {
     crLines.push(afterRI[i]);
   }
   const rows = parseCompanyRateRows(crLines.join('\n'));
+  rows.forEach((r, i) => { r.cocode = coCodes[i] || ''; });
   return { common:{filingAtGlance, rateInformation}, rows };
 }
 
