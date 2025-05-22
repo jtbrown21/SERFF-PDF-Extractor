@@ -37,6 +37,23 @@ CONFIG.fieldRules = CONFIG.fieldLabels.map(l => ({
 }));
 const norm = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
+// convert raw text that still contains escaped newline/quote sequences
+function normalizeText(t) {
+  if (!t) return t;
+  const textMatch = t.match(/"text"\s*:\s*"([\s\S]*?)"\s*(,|$)/);
+  if (textMatch) {
+    t = textMatch[1];
+  }
+  if (!t.includes('\n') && t.includes('\\n')) {
+    t = t
+      .replace(/\\r\\n/g, '\n')
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"');
+  }
+  return t;
+}
+
 // heuristics --------------------------------------------------------------
 const looksPercent = v => /^-?\d*(?:\.\d+)?%$/.test(v.trim()) || v.trim() === '%';
 const looksCompany = v => /^[a-z][a-z .,&'-]{3,}$/i.test(v.trim());
@@ -133,6 +150,7 @@ function parseCompanyRateRows(block) {
 
 // ---------- rate helpers -------------------------------------------------
 function extractSERFF(text) {
+  text = normalizeText(text);
   const cleaned = text
     .split('\n')
     .filter(l => !CONFIG.footerRe.test(l))
