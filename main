@@ -109,16 +109,6 @@ function parseSection(lines) {
 
 // ---------- Company Rate block ➜ row objects -----------------------------
 function parseCompanyRateRows(block) {
-  const raw = block.split('\n').map(l => l.trim());
-  const start = raw.findIndex(l => l && !l.endsWith(':'));
-  if (start === -1) return [];
-  let vals = [];
-  for (let i = start; i < raw.length; i++) {
-    const line = raw[i];
-    if (!line) continue;
-    if (line.endsWith(':')) break; // stop at next header
-    vals.push(line);
-  }
   const CHUNK = CONFIG.fieldLabels.length;
   if (vals.length >= CHUNK - 1) {
     const m = vals[0].match(/^(.*?\S)\s+(-?\d.*%?)$/);
@@ -145,7 +135,6 @@ function parseCompanyRateRows(block) {
   }
 
   if (!rows.length) {
-    const trimmed = vals.slice();
     if (trimmed.length === CHUNK - 1) {
       const m = trimmed[0].match(/^(.*?\S)\s+(-?\d.*%?)$/);
       if (m) {
