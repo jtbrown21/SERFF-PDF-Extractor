@@ -110,6 +110,12 @@ function parseSection(lines) {
 // ---------- Company Rate block ➜ row objects -----------------------------
 function parseCompanyRateRows(block) {
   const CHUNK = CONFIG.fieldLabels.length;
+  let vals = String(block)
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean);
+  const trimmed = vals.slice();
+
   if (vals.length >= CHUNK - 1) {
     const m = vals[0].match(/^(.*?\S)\s+(-?\d.*%?)$/);
     if (m) vals = [m[1], m[2], ...vals.slice(1)];
