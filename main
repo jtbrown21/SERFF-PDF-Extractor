@@ -114,6 +114,13 @@ function parseCompanyRateRows(block) {
     .split('\n')
     .map(l => l.trim())
     .filter(Boolean);
+  const maybeHeader = vals.slice(0, CHUNK)
+    .map(v => v.replace(/:+$/, ''))
+    .map(v => norm(v));
+  const expected = CONFIG.fieldRules.map(fr => fr.key);
+  if (maybeHeader.length === CHUNK && expected.every((e, i) => maybeHeader[i] === e)) {
+    vals = vals.slice(CHUNK);
+  }
   const trimmed = vals.slice();
 
   if (vals.length >= CHUNK - 1) {
