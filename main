@@ -178,6 +178,14 @@ function extractSERFF(text) {
 
   const coCodes = Array.from(cleaned.matchAll(/CoCode:\s*(\d+)/gi), m => m[1].trim());
 
+  let groupName = '';
+  const gnIdx = lines.findIndex(l => /^group name:/i.test(l));
+  if (gnIdx !== -1) {
+    groupName = lines[gnIdx].replace(/^group name:\s*/i, '').trim();
+    const next = lines[gnIdx + 1] ? lines[gnIdx + 1].trim() : '';
+    if (next && !/:/.test(next)) groupName = (groupName + ' ' + next).trim();
+  }
+
   const disapproved = /(serff status:|state status:|disposition status:)[^\n]*disapproved/i.test(cleaned);
 
   // Filing‑at‑a‑Glance ------------------------------------------------------
@@ -193,7 +201,7 @@ function extractSERFF(text) {
   delete filingAtGlance.companies;
 
   if (disapproved) {
-    return { disapproved: true, common: { filingAtGlance, rateInformation: {} }, rows: [] };
+    return { disapproved: true, common: { filingAtGlance, rateInformation: {}, groupname: groupName }, rows: [] };
   }
 
   // Rate Information -------------------------------------------------------
@@ -226,7 +234,7 @@ function extractSERFF(text) {
   // Company Rate Information ----------------------------------------------
   const afterRI = lines.slice(riLineIdx + 1);
   const crIdx = afterRI.findIndex(l => /^company rate information$/i.test(l));
-  if (crIdx === -1) return { common:{filingAtGlance, rateInformation}, rows: [] };
+  if (crIdx === -1) return { common:{filingAtGlance, rateInformation, groupname: groupName}, rows: [] };
   const crLines = [];
   for (let i = crIdx + 1; i < afterRI.length; i++) {
     const t = afterRI[i].toLowerCase();
@@ -235,7 +243,7 @@ function extractSERFF(text) {
   }
   const rows = parseCompanyRateRows(crLines.join('\n'));
   rows.forEach((r, i) => { r.cocode = coCodes[i] || ''; });
-  return { common:{filingAtGlance, rateInformation}, rows };
+  return { common:{filingAtGlance, rateInformation, groupname: groupName}, rows };
 }
 
 // ================== n8n wrapper =========================================
@@ -245,11 +253,11 @@ items.forEach(item => {
   try {
     const { common, rows, disapproved } = extractSERFF(item.json.text || '');
     if (rows.length) {
-      rows.forEach(r => out.push({ json: { ...common.filingAtGlance, ...common.rateInformation, ...r } }));
+      rows.forEach(r => out.push({ json: { ...common.filingAtGlance, ...common.rateInformation, groupname: common.groupname, ...r } }));
     } else if (disapproved) {
-      out.push({ json: { ...common.filingAtGlance } });
+      out.push({ json: { ...common.filingAtGlance, groupname: common.groupname } });
     } else {
-      out.push({ json: { ...common.filingAtGlance, ...common.rateInformation, parse_warning: 'No Company Rate rows found' } });
+      out.push({ json: { ...common.filingAtGlance, ...common.rateInformation, groupname: common.groupname, parse_warning: 'No Company Rate rows found' } });
     }
   } catch (err) {
     out.push({ json: { parse_error: err.message, snippet: (item.json.text || '').slice(0, 100) } });
